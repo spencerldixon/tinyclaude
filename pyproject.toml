@@ -1,0 +1,17 @@
+[project]
+name = "tinyclaude"
+version = "0.1.0"
+description = "A Telegram bot powered by Claude Code on a Raspberry Pi"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "python-telegram-bot[job-queue]>=22.6",
+    "python-dotenv>=1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+tinyclaude = "tinyclaude.bot:main"

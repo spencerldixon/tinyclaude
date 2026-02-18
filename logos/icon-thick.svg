@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#fff"/>
+
+  <!-- T: top bar -->
+  <rect x="64" y="152" width="160" height="48" fill="#00FF41"/>
+  <!-- T: stem (overlaps top bar and foot to eliminate gaps) -->
+  <rect x="120" y="152" width="48" height="208" fill="#00FF41"/>
+  <!-- T: foot -->
+  <rect x="152" y="312" width="80" height="48" fill="#00FF41"/>
+
+  <!-- C: top bar -->
+  <rect x="320" y="152" width="128" height="48" fill="#00FF41"/>
+  <!-- C: left side -->
+  <rect x="280" y="200" width="48" height="112" fill="#00FF41"/>
+  <!-- C: bottom bar -->
+  <rect x="320" y="312" width="128" height="48" fill="#00FF41"/>
+</svg>

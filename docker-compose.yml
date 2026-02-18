@@ -1,0 +1,13 @@
+services:
+  tinyclaude:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - sessions:/data/sessions
+      - ~/.claude:/root/.claude:ro
+    environment:
+      - SESSIONS_DIR=/data/sessions
+
+volumes:
+  sessions:

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit(tinyclaude/HEARTBEAT.md)",
+      "Write(tinyclaude/HEARTBEAT.md)",
+      "WebSearch",
+      "WebFetch"
+    ]
+  }
+}
