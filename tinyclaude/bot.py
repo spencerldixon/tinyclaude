@@ -5,6 +5,7 @@ import os
 import re
 import time
 from datetime import datetime, timedelta
+from functools import wraps
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -17,19 +18,18 @@ from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 ALLOWED_USERS = {int(uid) for uid in os.environ.get("ALLOWED_USERS", "").split(",") if uid.strip()}
 SESSIONS_DIR = Path(os.environ.get("SESSIONS_DIR", Path.home() / ".tinyclaude" / "sessions"))
 SESSION_TIMEOUT = int(os.environ.get("SESSION_TIMEOUT", "1800"))
-HEARTBEAT_TIMEZONE = os.environ.get("HEARTBEAT_TIMEZONE", "Europe/London")
+SCHEDULER_TIMEZONE = os.environ.get("SCHEDULER_TIMEZONE", "Europe/London")
+SCHEDULER_PATH = Path(__file__).parent / "SCHEDULER.md"
 
-HEARTBEAT_PATH = Path(__file__).parent / "HEARTBEAT.md"
-
-from functools import wraps
-
-_heartbeat_mtime: float = 0.0
+_scheduler_mtime: float = 0.0
 
 
 def authorize_user(fn):
@@ -62,19 +62,18 @@ def save_session(chat_id, session_id):
 
 
 # ---------------------------------------------------------------------------
-# Heartbeat parser / writer
+# Scheduler parser / writer
 # ---------------------------------------------------------------------------
 
-def parse_heartbeat_file() -> list[dict]:
-    """Parse HEARTBEAT.md into a list of heartbeat entry dicts."""
-    if not HEARTBEAT_PATH.exists():
+def parse_scheduler_file() -> list[dict]:
+    """Parse SCHEDULER.md into a list of entry dicts."""
+    if not SCHEDULER_PATH.exists():
         return []
-    content = HEARTBEAT_PATH.read_text().strip()
+    content = SCHEDULER_PATH.read_text().strip()
     if not content:
         return []
 
     entries = []
-    # Split on ## headers
     blocks = re.split(r'^## ', content, flags=re.MULTILINE)
     for block in blocks:
         block = block.strip()
@@ -96,10 +95,10 @@ def parse_heartbeat_file() -> list[dict]:
     return entries
 
 
-def write_heartbeat_file(heartbeats: list[dict]) -> None:
-    """Serialize list of heartbeat dicts back to HEARTBEAT.md format."""
+def write_scheduler_file(entries: list[dict]) -> None:
+    """Serialize list of entry dicts back to SCHEDULER.md format."""
     blocks = []
-    for entry in heartbeats:
+    for entry in entries:
         lines = [f"## {entry['name']}"]
         for key in ("schedule", "chat_id", "prompt", "timezone", "enabled"):
             if key in entry:
@@ -108,18 +107,18 @@ def write_heartbeat_file(heartbeats: list[dict]) -> None:
                     value = "true" if value else "false"
                 lines.append(f"- **{key}:** {value}")
         blocks.append('\n'.join(lines))
-    HEARTBEAT_PATH.write_text('\n\n'.join(blocks) + ('\n' if blocks else ''))
+    SCHEDULER_PATH.write_text('\n\n'.join(blocks) + ('\n' if blocks else ''))
 
 
 def _inject_chat_id(chat_id: int) -> None:
-    """Backfill chat_id into any heartbeat entries missing it."""
-    if not HEARTBEAT_PATH.exists():
+    """Backfill chat_id into any scheduler entries missing it."""
+    if not SCHEDULER_PATH.exists():
         return
-    heartbeats = parse_heartbeat_file()
-    if not heartbeats:
+    entries = parse_scheduler_file()
+    if not entries:
         return
     changed = False
-    for entry in heartbeats:
+    for entry in entries:
         if "chat_id" not in entry:
             entry["chat_id"] = str(chat_id)
             changed = True
@@ -130,7 +129,7 @@ def _inject_chat_id(chat_id: int) -> None:
                 entry["chat_id"] = str(chat_id)
                 changed = True
     if changed:
-        write_heartbeat_file(heartbeats)
+        write_scheduler_file(entries)
 
 
 # ---------------------------------------------------------------------------
@@ -191,103 +190,95 @@ def parse_schedule(schedule_str: str, tz: ZoneInfo) -> tuple[str, dict]:
 
 
 # ---------------------------------------------------------------------------
-# Heartbeat scheduler
+# Scheduler
 # ---------------------------------------------------------------------------
 
-def sync_heartbeats(app: Application) -> None:
-    """Read HEARTBEAT.md, clear existing heartbeat jobs, and schedule new ones."""
-    global _heartbeat_mtime
+def sync_scheduler(app: Application) -> None:
+    """Read SCHEDULER.md, clear existing scheduled jobs, and schedule new ones."""
+    global _scheduler_mtime
 
-    heartbeats = parse_heartbeat_file()
+    entries = parse_scheduler_file()
 
-    # Remove all existing heartbeat jobs
-    current_jobs = app.job_queue.get_jobs_by_name("heartbeat_marker")
-    # We name jobs with a heartbeat_ prefix; get_jobs_by_name is exact match,
-    # so we iterate all jobs and filter by name prefix.
     for job in app.job_queue.jobs():
-        if job.name and job.name.startswith("heartbeat_"):
+        if job.name and job.name.startswith("scheduler_"):
             job.schedule_removal()
 
-    default_tz = ZoneInfo(HEARTBEAT_TIMEZONE)
-
-    for entry in heartbeats:
+    for entry in entries:
         if not entry.get("enabled", True):
             continue
 
-        tz_name = entry.get("timezone", HEARTBEAT_TIMEZONE)
+        tz_name = entry.get("timezone", SCHEDULER_TIMEZONE)
         tz = ZoneInfo(tz_name)
         chat_id = entry.get("chat_id")
         prompt = entry.get("prompt", "")
         name = entry.get("name", "unnamed")
         schedule = entry.get("schedule", "")
-        job_name = f"heartbeat_{name}"
+        job_name = f"scheduler_{name}"
 
         try:
             chat_id_int = int(chat_id)
         except (ValueError, TypeError):
-            logger.warning("Skipping heartbeat '%s': invalid or missing chat_id '%s'", name, chat_id)
+            logger.warning("Skipping scheduler entry '%s': invalid or missing chat_id '%s'", name, chat_id)
             continue
 
         try:
             method_name, kwargs = parse_schedule(schedule, tz)
         except ValueError as e:
-            logger.warning("Skipping heartbeat '%s': %s", name, e)
+            logger.warning("Skipping scheduler entry '%s': %s", name, e)
             continue
 
         job_data = {"chat_id": chat_id_int, "prompt": prompt, "name": name, "schedule": schedule}
 
         method = getattr(app.job_queue, method_name)
-        method(callback=heartbeat_callback, name=job_name, data=job_data, **kwargs)
-        logger.info("Scheduled heartbeat '%s': %s %s", name, method_name, schedule)
+        method(callback=scheduler_callback, name=job_name, data=job_data, **kwargs)
+        logger.info("Scheduled '%s': %s %s", name, method_name, schedule)
 
-    # Update mtime
-    if HEARTBEAT_PATH.exists():
-        _heartbeat_mtime = HEARTBEAT_PATH.stat().st_mtime
+    if SCHEDULER_PATH.exists():
+        _scheduler_mtime = SCHEDULER_PATH.stat().st_mtime
     else:
-        _heartbeat_mtime = 0.0
+        _scheduler_mtime = 0.0
 
 
-def maybe_sync_heartbeats(app: Application) -> None:
-    """Check if HEARTBEAT.md changed (via mtime) and re-sync if so."""
-    global _heartbeat_mtime
-    if not HEARTBEAT_PATH.exists():
-        if _heartbeat_mtime != 0.0:
-            _heartbeat_mtime = 0.0
-            sync_heartbeats(app)
+def maybe_sync_scheduler(app: Application) -> None:
+    """Check if SCHEDULER.md changed (via mtime) and re-sync if so."""
+    global _scheduler_mtime
+    if not SCHEDULER_PATH.exists():
+        if _scheduler_mtime != 0.0:
+            _scheduler_mtime = 0.0
+            sync_scheduler(app)
         return
-    current_mtime = HEARTBEAT_PATH.stat().st_mtime
-    if current_mtime != _heartbeat_mtime:
-        logger.info("HEARTBEAT.md changed (mtime %.2f -> %.2f), re-syncing", _heartbeat_mtime, current_mtime)
-        sync_heartbeats(app)
+    current_mtime = SCHEDULER_PATH.stat().st_mtime
+    if current_mtime != _scheduler_mtime:
+        logger.info("SCHEDULER.md changed (mtime %.2f -> %.2f), re-syncing", _scheduler_mtime, current_mtime)
+        sync_scheduler(app)
 
 
-async def heartbeat_callback(context) -> None:
-    """Fired by JobQueue when a scheduled heartbeat triggers."""
+async def scheduler_callback(context) -> None:
+    """Fired by JobQueue when a scheduled job triggers."""
     data = context.job.data
     chat_id = data["chat_id"]
     prompt = data["prompt"]
     name = data["name"]
     schedule = data["schedule"]
 
-    logger.info("Heartbeat firing: '%s'", name)
+    logger.info("Scheduler firing: '%s'", name)
 
-    # Run prompt via claude --print as a fresh session (no resume)
     cmd = ["claude", "--output-format", "json", "--print", prompt]
     proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stdout, stderr = await proc.communicate()
+    out = stdout.decode()
 
     if proc.returncode != 0:
         err = stderr.decode().strip()
-        logger.error("Heartbeat '%s' claude error (rc=%d): %s", name, proc.returncode, err)
-        response = f"Heartbeat '{name}' error: {err or 'unknown error'}"
+        logger.error("Scheduler '%s' claude error (rc=%d): %s", name, proc.returncode, err)
+        response = f"Scheduler '{name}' error: {err or 'unknown error'}"
     else:
         try:
-            result = json.loads(stdout.decode())
-            response = result.get("result", stdout.decode().strip()) or "(empty response)"
+            result = json.loads(out)
+            response = result.get("result", out.strip()) or "(empty response)"
         except (json.JSONDecodeError, KeyError):
-            response = stdout.decode().strip() or "(empty response)"
+            response = out.strip() or "(empty response)"
 
-    # Send response to chat, chunked at 4096
     for i in range(0, len(response), 4096):
         chunk = response[i : i + 4096]
         try:
@@ -295,14 +286,13 @@ async def heartbeat_callback(context) -> None:
         except Exception:
             await context.bot.send_message(chat_id=chat_id, text=chunk)
 
-    # If this was a one-off schedule, remove it from HEARTBEAT.md
+    # If this was a one-off schedule, remove it from SCHEDULER.md
     if schedule.startswith("once "):
-        heartbeats = parse_heartbeat_file()
-        heartbeats = [h for h in heartbeats if h.get("name") != name]
-        write_heartbeat_file(heartbeats)
-        logger.info("Removed one-off heartbeat '%s' after firing", name)
-        # Re-sync to clean up jobs
-        sync_heartbeats(context.application)
+        entries = parse_scheduler_file()
+        entries = [e for e in entries if e.get("name") != name]
+        write_scheduler_file(entries)
+        logger.info("Removed one-off entry '%s' after firing", name)
+        sync_scheduler(context.application)
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +305,6 @@ async def ask_claude(chat_id, message):
 
     cmd = ["claude", "--output-format", "json"]
 
-    # Resume session if present
     if session_id:
         cmd += ["--resume", session_id]
 
@@ -323,6 +312,7 @@ async def ask_claude(chat_id, message):
 
     proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stdout, stderr = await proc.communicate()
+    out = stdout.decode()
 
     if proc.returncode != 0:
         err = stderr.decode().strip()
@@ -330,11 +320,11 @@ async def ask_claude(chat_id, message):
         return f"Error: {err or 'unknown error'}"
 
     try:
-        result = json.loads(stdout.decode())
+        result = json.loads(out)
         save_session(chat_id, result.get("session_id", session_id))
-        return result.get("result", stdout.decode().strip()) or "(empty response)"
+        return result.get("result", out.strip()) or "(empty response)"
     except (json.JSONDecodeError, KeyError):
-        return stdout.decode().strip() or "(empty response)"
+        return out.strip() or "(empty response)"
 
 
 # ---------------------------------------------------------------------------
@@ -357,13 +347,45 @@ async def reset(update, context):
 
 
 @authorize_user
-async def heartbeat(update, context):
-    """Return the contents of HEARTBEAT.md"""
+async def scheduler(update, context):
+    """Return the contents of SCHEDULER.md"""
     try:
-        content = HEARTBEAT_PATH.read_text().strip()
+        content = SCHEDULER_PATH.read_text().strip()
     except FileNotFoundError:
         content = ""
-    await update.message.reply_text(content or "No heartbeats scheduled.")
+    await update.message.reply_text(content or "No tasks scheduled")
+
+
+@authorize_user
+async def help_command(update, context):
+    """List all available slash commands."""
+    lines = [
+        "/start — say hello",
+        "/reset — clear the current Claude session",
+        "/scheduler — show the raw SCHEDULER.md schedule file",
+        "/jobs — list currently active scheduled jobs",
+        "/help — show this message",
+    ]
+    await update.message.reply_text("\n".join(lines))
+
+
+@authorize_user
+async def jobs(update, context):
+    """List all currently scheduled jobs."""
+    scheduled = list(context.application.job_queue.jobs())
+
+    if not scheduled:
+        await update.message.reply_text("No jobs scheduled")
+        return
+
+    lines = []
+    for job in scheduled:
+        data = job.data or {}
+        name = data.get("name", job.name.removeprefix("scheduler_"))
+        schedule = data.get("schedule", "unknown")
+        lines.append(f"• *{name}*: `{schedule}`")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
 # ---------------------------------------------------------------------------
@@ -382,9 +404,8 @@ async def handle_message(update, context):
         except Exception:
             await update.message.reply_text(chunk)
 
-    # Inject chat_id into any new entries missing it, then sync
     _inject_chat_id(update.effective_chat.id)
-    maybe_sync_heartbeats(context.application)
+    maybe_sync_scheduler(context.application)
 
 
 # ---------------------------------------------------------------------------
@@ -392,27 +413,25 @@ async def handle_message(update, context):
 # ---------------------------------------------------------------------------
 
 async def post_init(app: Application) -> None:
-    """Called after the application is initialized. Loads heartbeats from file."""
-    sync_heartbeats(app)
-    logger.info("Heartbeat scheduler initialized")
+    """Called after the application is initialized. Loads scheduler from file."""
+    sync_scheduler(app)
+    logger.info("Scheduler initialized")
 
 
 def main():
     """Start the bot"""
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # Register post-init to load heartbeats at startup
     app.post_init = post_init
 
-    # Handle slash commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reset", reset))
-    app.add_handler(CommandHandler("heartbeat", heartbeat))
+    app.add_handler(CommandHandler("scheduler", scheduler))
+    app.add_handler(CommandHandler("jobs", jobs))
+    app.add_handler(CommandHandler("help", help_command))
 
-    # Handle messages
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Run until quit
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

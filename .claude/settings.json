@@ -2,10 +2,23 @@
   "permissions": {
     "allow": [
       "Read",
-      "Edit(tinyclaude/HEARTBEAT.md)",
-      "Write(tinyclaude/HEARTBEAT.md)",
+      "Edit(CLAUDE.md)",
+      "Edit(tinyclaude/SCHEDULER.md)",
+      "Write(tinyclaude/SCHEDULER.md)",
+      "Edit(tinyclaude/TODO.md)",
+      "Write(tinyclaude/TODO.md)",
+      "Write(tinyclaude/NOTES/*.md)",
+      "Edit(tinyclaude/NOTES/*.md)",
+      "Edit(tinyclaude/TODAY.md)",
+      "Write(tinyclaude/TODAY.md)",
+      "Edit(tinyclaude/TOMORROW.md)",
+      "Write(tinyclaude/TOMORROW.md)",
+      "Edit(README.md)",
+      "Write(README.md)",
       "WebSearch",
-      "WebFetch"
+      "WebFetch",
+      "Glob",
+      "Grep"
     ]
   }
 }

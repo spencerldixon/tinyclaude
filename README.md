@@ -14,7 +14,7 @@ Each Telegram chat maintains a conversation session with a 30-minute timeout. Th
 
 ### Scheduling
 
-We write reminders and recurring tasks to a `HEARTBEAT.md` file. When this file changes, Claude parses it and turns the tasks into scheduled Jobs that execute when required. This approach means no unnecessary polling and you can list your entire `HEARTBEAT.md` at any time with `/heartbeat`
+We write reminders and recurring tasks to a `SCHEDULER.md` file. When this file changes, Claude parses it and turns the tasks into scheduled Jobs that execute when required. This approach means no unnecessary polling and you can list your entire `SCHEDULER.md` at any time with `/scheduler`
 
 ## Installation
 
@@ -80,7 +80,20 @@ TELEGRAM_TOKEN=your-bot-token-from-step-1
 ALLOWED_USERS=your-user-id-from-step-2
 ```
 
-### Step 5: Run
+### Step 5: Set up user data files
+
+`SCHEDULER.md`, `TODO.md`, `TODAY.md`, `TOMORROW.md`, and the `NOTES/` directory hold your personal data and are gitignored. Copy the blank starters to create your own:
+
+```bash
+cp tinyclaude/SCHEDULER.md.example tinyclaude/SCHEDULER.md
+cp tinyclaude/TODO.md.example tinyclaude/TODO.md
+cp tinyclaude/TODAY.md.example tinyclaude/TODAY.md
+cp tinyclaude/TOMORROW.md.example tinyclaude/TOMORROW.md
+```
+
+**TODAY.md** is your daily focus — what you're working on today. **TOMORROW.md** is the queue for tomorrow. At end of day, clear TODAY.md and move everything from TOMORROW.md into it.
+
+### Step 6: Run
 
 See the Docker or local install sections below.
 
@@ -143,7 +156,9 @@ source .env && uv run tinyclaude
 |---------|-------------|
 | `/start` | Greeting and info |
 | `/reset` | Clear conversation session and start fresh |
-| `/heartbeat` | List scheduled jobs in the HEARTBEAT.md file |
+| `/scheduler` | Show the SCHEDULER.md schedule file |
+| `/jobs` | List currently active scheduled jobs |
+| `/help` | List all slash commands |
 
 ## Configuration
 

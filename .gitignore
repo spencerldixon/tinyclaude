@@ -12,3 +12,11 @@ wheels/
 # Environment files
 .env
 .env.local
+
+# User data (use the .example files as starting points)
+tinyclaude/SCHEDULER.md
+tinyclaude/TODO.md
+tinyclaude/TODAY.md
+tinyclaude/TOMORROW.md
+tinyclaude/NOTES/*
+!tinyclaude/NOTES/.gitkeep

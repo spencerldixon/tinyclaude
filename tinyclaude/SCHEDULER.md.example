@@ -1,0 +1,13 @@
+## Stale Task Check
+- **schedule:** daily 09:00
+- **chat_id:** 12341234
+- **prompt:** Get today's date. Read tinyclaude/TODO.md. Check for any tasks that were added more than 7 days ago. If there are any, list them and ask me whether each should be kept, delegated, or dropped. If there are no stale tasks, say nothing.
+- **timezone:** Europe/London
+- **enabled:** true
+
+## Morning Check-in
+- **schedule:** daily 09:00
+- **chat_id:** 12341234
+- **prompt:** Good morning! Read tinyclaude/TODO.md and give me the top 3 things to work on today that move the needle or make sure I don't miss something important. Be brief — 3 bullet points max, no waffle.
+- **timezone:** Europe/London
+- **enabled:** true
